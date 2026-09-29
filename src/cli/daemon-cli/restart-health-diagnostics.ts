@@ -71,6 +71,11 @@ export function renderRestartDiagnostics(snapshot: GatewayRestartSnapshot): stri
       lines.push(`- ${channel.id}: ${channel.error}`);
     }
   }
+  if (snapshot.waitOutcome === "port-held-foreign") {
+    lines.push(
+      `Gateway port ${snapshot.portUsage.port} is held by another process; not a Gateway listener.`,
+    );
+  }
   const runtimeSummary = [
     snapshot.runtime.status ? `status=${snapshot.runtime.status}` : null,
     snapshot.runtime.state ? `state=${snapshot.runtime.state}` : null,
@@ -100,6 +105,20 @@ export function formatGatewayRestartFailure(params: {
     return {
       statusLine: `Gateway restart failed after ${elapsedSeconds}s: service stayed stopped and port ${params.port} stayed free.`,
       failMessage: `Gateway restart failed after ${elapsedSeconds}s: service stayed stopped and health checks never came up.`,
+    };
+  }
+  if (params.health.waitOutcome === "port-held-foreign") {
+    const listenerLines = (params.health.portUsage.listeners ?? [])
+      .map((listener) => {
+        const pid = listener.pid != null ? `pid ${listener.pid}` : "pid ?";
+        const command = listener.commandLine || listener.command || "unknown process";
+        return `${pid}: ${command}`;
+      })
+      .join(", ");
+    const suffix = listenerLines ? ` Current listeners: ${listenerLines}.` : "";
+    return {
+      statusLine: `Gateway port ${params.port} is held by another process; not a Gateway listener.${suffix}`,
+      failMessage: `Gateway port ${params.port} is held by another process. Stop the foreign listener or change the configured Gateway port.`,
     };
   }
   const reason = params.health.waitOutcome && restartFailureReasons[params.health.waitOutcome];

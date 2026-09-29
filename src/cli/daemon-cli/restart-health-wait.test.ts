@@ -885,4 +885,113 @@ describe("restart health", () => {
     ).rejects.toBe(aborted);
     expect(inspectPortUsage).toHaveBeenCalledOnce();
   });
+
+  it("exits promptly when a non-gateway listener holds the Gateway port", async () => {
+    classifyPortListener.mockReturnValue("non_gateway");
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [{ pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" }],
+      hints: [],
+    });
+
+    const { waitForGatewayHealthyRestart } = await import("./restart-health.js");
+    const snapshot = await waitForGatewayHealthyRestart({
+      service: makeGatewayService({ status: "stopped" }),
+      port: 18789,
+      attempts: 120,
+      delayMs: 500,
+    });
+
+    expect(snapshot.waitOutcome).toBe("port-held-foreign");
+    expect(snapshot.healthy).toBe(false);
+    expect(snapshot.runtime.status).toBe("stopped");
+    expect(snapshot.portUsage.listeners).toEqual([
+      { pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" },
+    ]);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(callGateway).not.toHaveBeenCalled();
+  });
+
+  it("exits promptly when an unknown listener holds the Gateway port and no service is running", async () => {
+    classifyPortListener.mockReturnValue("unknown");
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [{ pid: 5151, command: "?", commandLine: "another-listener" }],
+      hints: [],
+    });
+
+    const { waitForGatewayHealthyRestart } = await import("./restart-health.js");
+    const snapshot = await waitForGatewayHealthyRestart({
+      service: makeGatewayService({ status: "stopped" }),
+      port: 18789,
+      attempts: 60,
+      delayMs: 1_000,
+    });
+
+    expect(snapshot.waitOutcome).toBe("port-held-foreign");
+    expect(snapshot.healthy).toBe(false);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("does not early-exit when a foreign listener shares the port with a Gateway listener", async () => {
+    let inspections = 0;
+    classifyPortListener.mockImplementation((listener: unknown) => {
+      const typed = listener as { command?: string };
+      return typed.command === "openclaw" ? "gateway" : "non_gateway";
+    });
+    // Stop the service so the only thing preventing the foreign-listener
+    // early exit is the presence of a Gateway-classified listener on the
+    // same port. The PID is irrelevant because the runtime status is
+    // "stopped".
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [
+        { pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" },
+        { pid: 8000, command: "openclaw", commandLine: "openclaw-gateway" },
+      ],
+      hints: [],
+    });
+    callGateway.mockImplementation(
+      gatewayHealthResponse({ server: { version: "2026.8.1" } }),
+    );
+
+    const { waitForGatewayHealthyRestart } = await import("./restart-health.js");
+    const snapshot = await waitForGatewayHealthyRestart({
+      service: makeGatewayService({ status: "stopped" }),
+      port: 18789,
+      expectedVersion: "2026.8.1",
+      attempts: 4,
+      delayMs: 10,
+      settle: { probes: 1 },
+    });
+
+    expect(snapshot.waitOutcome).not.toBe("port-held-foreign");
+    // Inspect at least once before exit so we exercise the loop body.
+    inspections += inspectPortUsage.mock.calls.length;
+    expect(inspections).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not early-exit while the Gateway service is still running even with foreign neighbors on the port", async () => {
+    classifyPortListener.mockReturnValue("non_gateway");
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [{ pid: 8000, command: "openclaw" }, { pid: 4242, command: "socat" }],
+      hints: [],
+    });
+
+    const { waitForGatewayHealthyRestart } = await import("./restart-health.js");
+    const snapshot = await waitForGatewayHealthyRestart({
+      service: makeGatewayService({ status: "running", pid: 8000 }),
+      port: 18789,
+      attempts: 2,
+      delayMs: 1,
+      settle: { probes: 1 },
+    });
+
+    expect(snapshot.waitOutcome).not.toBe("port-held-foreign");
+  });
 });
