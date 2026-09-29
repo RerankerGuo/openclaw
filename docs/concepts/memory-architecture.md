@@ -51,7 +51,7 @@ Five rules shape everything below:
 | ------------ | ------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
 | Instructions | `AGENTS.md` and workspace instruction files             | Human only                                          | Always, at session start                               |
 | Curated core | `MEMORY.md`, `USER.md`                                  | Dreaming consolidation; direct user request         | At session start when provenance is eligible; budgeted |
-| Episodic     | `memory/YYYY-MM-DD.md` daily notes, session transcripts | Agent during work; memory flush; transcript capture | Never; searchable on demand                            |
+| Episodic     | `memory/YYYY-MM-DD.md` daily notes, session transcripts | Agent during work; memory flush; transcript capture | Not by default; can be recalled into private replies by the Active Memory cross-conversation pass (see note below) |
 | Prospective  | Standing intents (SQLite) and cron jobs                 | `intent` tool; scheduled tasks                      | Only when a trigger fires                              |
 | Review       | `DREAMS.md`, dreaming reports                           | Dreaming phases                                     | Never; for human reading                               |
 
@@ -62,6 +62,20 @@ files are large, append-friendly,
 and reachable only through explicit search tools or the escalation lane.
 Nothing crosses from episodic to curated without passing the promotion gates
 described below.
+
+The Episodic row's "Injected" cell is intentionally narrower than
+"Never": episodic content is **not** part of the standard session-start
+context, but when an agent opts into
+[Remember across conversations](/concepts/active-memory#remember-across-conversations),
+the Active Memory pass can read transcript excerpts from that agent's other
+private conversations into the reply pre-generation context. That is a
+separate mechanism from the on-demand `memory_search` / `memory_recall`
+tools, both of which only run when the agent or user explicitly invokes
+them. The two paths share the same privacy boundary described in
+[Active Memory enabling](/concepts/active-memory#remember-across-conversations):
+only the same agent's recognized private conversations are eligible, the
+conversation being answered is excluded, and groups, channels, and other
+agents never contribute.
 
 ## Provenance: every memory knows where it came from
 
