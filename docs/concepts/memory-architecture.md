@@ -47,13 +47,13 @@ Five rules shape everything below:
 
 ## The tier model
 
-| Tier         | Surface                                                 | Written by                                          | Injected                                               |
-| ------------ | ------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
-| Instructions | `AGENTS.md` and workspace instruction files             | Human only                                          | Always, at session start                               |
-| Curated core | `MEMORY.md`, `USER.md`                                  | Dreaming consolidation; direct user request         | At session start when provenance is eligible; budgeted |
+| Tier         | Surface                                                 | Written by                                          | Injected                                                                                                           |
+| ------------ | ------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Instructions | `AGENTS.md` and workspace instruction files             | Human only                                          | Always, at session start                                                                                           |
+| Curated core | `MEMORY.md`, `USER.md`                                  | Dreaming consolidation; direct user request         | At session start when provenance is eligible; budgeted                                                             |
 | Episodic     | `memory/YYYY-MM-DD.md` daily notes, session transcripts | Agent during work; memory flush; transcript capture | Not by default; can be recalled into private replies by the Active Memory cross-conversation pass (see note below) |
-| Prospective  | Standing intents (SQLite) and cron jobs                 | `intent` tool; scheduled tasks                      | Only when a trigger fires                              |
-| Review       | `DREAMS.md`, dreaming reports                           | Dreaming phases                                     | Never; for human reading                               |
+| Prospective  | Standing intents (SQLite) and cron jobs                 | `intent` tool; scheduled tasks                      | Only when a trigger fires                                                                                          |
+| Review       | `DREAMS.md`, dreaming reports                           | Dreaming phases                                     | Never; for human reading                                                                                           |
 
 The boundary that matters most is between the **curated core** and the
 **episodic** tier. Curated files are small, normally in context when their
