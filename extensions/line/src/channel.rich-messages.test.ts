@@ -12,7 +12,7 @@ import {
   prepareLineReplyPayload,
   renderLineCard,
 } from "./rich-messages.js";
-import type { LineRichCard } from "./types.js";
+import type { LineRichCard } from "./rich-messages.js";
 
 const DIRECT_TARGET = "line:U0123456789abcdef0123456789abcdef";
 

@@ -21,7 +21,7 @@ import {
   isRecord,
   normalizeLowercaseStringOrEmpty,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { hasLineCredentials } from "./account-helpers.js";
 import { resolveLineAccount } from "./accounts.js";
 import { messageAction, postbackAction, type Action } from "./actions.js";
@@ -35,7 +35,7 @@ import { fitsLineFlexBubble } from "./flex-templates/message.js";
 import { createAgendaCard, createEventCard } from "./flex-templates/schedule-cards.js";
 import { inferLineTargetChatType } from "./messaging-target.js";
 import { buildLineQuestionPostbackData } from "./question-postback.js";
-import type { LineQuickReplyItem, LineRichCard } from "./types.js";
+import type { LineQuickReplyItem } from "./types.js";
 
 const nonempty = () => Type.String({ minLength: 1 });
 const closed = <T extends Parameters<typeof Type.Object>[0]>(properties: T) =>
@@ -85,6 +85,8 @@ const lineCardSchema = Type.Union([
     status: Type.Optional(nonempty()),
   }),
 ]);
+
+export type LineRichCard = Static<typeof lineCardSchema>;
 
 const lineChannelDataSchema = Type.Optional(
   closed({
