@@ -4,7 +4,7 @@ import type { MessageReceipt } from "openclaw/plugin-sdk/channel-outbound";
 import type { MediaKind } from "openclaw/plugin-sdk/media-runtime";
 import type { z } from "zod";
 import type { LineAccountConfigSchema, LineConfigSchema } from "./config-schema.js";
-import type { LineRichCard } from "./rich-messages.js";
+import type { LineRichCard } from "./rich-message-schema.js";
 
 export type LineTokenSource = "config" | "env" | "file" | "none";
 export type LineCredentialStatus = "available" | "configured_unavailable" | "missing";
