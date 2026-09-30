@@ -5,6 +5,7 @@ import type { GatewayService } from "../../daemon/service.js";
 import { createConfiguredGatewayLocalProbe } from "../../gateway/local-http-probe.js";
 import { readActiveGatewayLockIdentity } from "../../infra/gateway-lock.js";
 import { readGatewayOwnerLease } from "../../infra/gateway-owner-lease.js";
+import { classifyPortListener } from "../../infra/ports.js";
 import {
   hasActiveStartupMigrationLease,
   STARTUP_MIGRATION_HEARTBEAT_INTERVAL_MS,
@@ -60,6 +61,42 @@ function shouldEarlyExitStoppedFree(
     snapshot.runtime.status === "stopped" &&
     snapshot.portUsage.status === "free"
   );
+}
+
+/**
+ * `status` and `channels status --probe` already know when the port is held by
+ * a listener that does not identify as a Gateway. Returning here keeps
+ * diagnostic callers from waiting out the full restart-health budget when no
+ * Gateway is coming up on this port. Service runtime status and listener PID
+ * ownership are not required — a foreign listener with no service owner is
+ * exactly the case where polling further wastes the operator-visible wait.
+ */
+function shouldEarlyExitPortHeldByForeignListener(snapshot: GatewayRestartSnapshot): boolean {
+  if (snapshot.portUsage.status !== "busy") {
+    return false;
+  }
+  if (snapshot.portUsage.listeners.length === 0) {
+    return false;
+  }
+  if (snapshot.runtime.status === "running") {
+    return false;
+  }
+  const gatewayOwnedListeners = snapshot.portUsage.listeners.filter(
+    (listener) => classifyPortListener(listener, snapshot.portUsage.port) === "gateway",
+  );
+  if (gatewayOwnedListeners.length > 0) {
+    return false;
+  }
+  const runtimePid = snapshot.runtime.pid;
+  if (typeof runtimePid === "number" && Number.isFinite(runtimePid)) {
+    const ownedByRuntime = snapshot.portUsage.listeners.some((listener) =>
+      listenerOwnedByRuntimePid({ listener, runtimePid }),
+    );
+    if (ownedByRuntime) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function stoppedFreeEarlyExitGraceMs(): number {
@@ -354,6 +391,9 @@ export async function waitForGatewayHealthyRestart(
       }
       if (snapshot.staleGatewayPids.length > 0 && snapshot.runtime.status !== "running") {
         return withWaitContext(snapshot, "stale-pids", elapsedMs);
+      }
+      if (shouldEarlyExitPortHeldByForeignListener(snapshot)) {
+        return withWaitContext(snapshot, "port-held-foreign", elapsedMs);
       }
       const stoppedFree =
         snapshot.runtime.status === "stopped" && snapshot.portUsage.status === "free";
