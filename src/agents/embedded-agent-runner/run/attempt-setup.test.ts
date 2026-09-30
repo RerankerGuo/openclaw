@@ -273,6 +273,47 @@ describe("prepareEmbeddedAttemptSetup", () => {
     ).rejects.toThrow("sandbox workspace is not read-write; collection review skipped");
   });
 
+  it("treats a node-placed workspace as opaque and skips the gateway mkdir (see #161028)", async () => {
+    // Linux-style node home on a non-Linux gateway host: the gateway must not
+    // touch the filesystem. The path is preserved verbatim so the permission
+    // policy still has a stable root.
+    const nodeHome = "/home/alice/node-claude-home";
+    const mkdirSpy = vi.spyOn(fs, "mkdir");
+
+    const setup = await resolveAttemptWorkspaceSandbox({
+      agentId: "main",
+      config: { agents: { defaults: { sandbox: { mode: "off" } } } },
+      sessionId: "session-adopted-claude-node",
+      sessionKey: "agent:main:adopted-claude-node",
+      workspaceDir: nodeHome,
+      execHost: "node",
+    });
+
+    expect(mkdirSpy).not.toHaveBeenCalled();
+    expect(setup.resolvedWorkspace).toBe(nodeHome);
+    expect(setup.effectiveWorkspace).toBe(nodeHome);
+    expect(setup.sessionPermissionRoot).toBe(nodeHome);
+    expect(setup.sandbox).toBeNull();
+  });
+
+  it("still creates the workspace locally when execHost is omitted (default local behaviour)", async () => {
+    const workspaceDir = tempDirs.make("openclaw-attempt-setup-local-default-");
+    const mkdirSpy = vi.spyOn(fs, "mkdir");
+
+    const setup = await resolveAttemptWorkspaceSandbox({
+      agentId: "main",
+      config: { agents: { defaults: { sandbox: { mode: "off" } } } },
+      sessionId: "session-local-default",
+      sessionKey: "agent:main:local-default",
+      workspaceDir,
+    });
+
+    // mkdir is invoked at least once for the resolved workspace and again for
+    // the effective workspace when sandbox is disabled.
+    expect(mkdirSpy).toHaveBeenCalled();
+    expect(setup.resolvedWorkspace).toBe(workspaceDir);
+  });
+
   it("reuses lifecycle metadata and the provider handle from the runtime plan", async () => {
     const metadataSnapshot = { plugins: [] } as never;
     const workspaceDir = path.join(os.tmpdir(), "openclaw-attempt-setup-prepared");

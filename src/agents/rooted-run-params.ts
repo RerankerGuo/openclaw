@@ -3,7 +3,16 @@ import type { SandboxContext } from "./sandbox/types.js";
 import type { PreparedSessionPermissionPolicy } from "./tool-fs-policy.js";
 import type { WorkspaceSandboxParams } from "./workspace-sandbox.js";
 
-export type RootedExecutionRequest = Readonly<{ root: string }>;
+export type RootedExecutionRequest = Readonly<{
+  root: string;
+  /**
+   * Optional host signal for callers that know the workspace physically lives
+   * on a paired node. When set, the gateway treats `root` as opaque and
+   * skips the local `fs.mkdir` / `fs.realpath` pass that would otherwise
+   * crash on a Linux-style node path running on a non-Linux gateway.
+   */
+  execHost?: "local" | "node";
+}>;
 
 /** Prepared by the host and retained outside child-visible MCP request context. */
 export type PreparedRootedExecutionCapability = Readonly<{
@@ -29,6 +38,9 @@ export async function prepareRootedExecutionCapability(
     sessionRoot: params.rootedExecution.root,
     requireWritableSandbox: true,
     requireWorkspaceOnly: true,
+    ...(params.rootedExecution.execHost !== undefined
+      ? { execHost: params.rootedExecution.execHost }
+      : {}),
   });
   return Object.freeze({
     root: workspace.resolvedWorkspace,

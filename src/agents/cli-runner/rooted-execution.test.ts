@@ -20,9 +20,9 @@ vi.mock("../sandbox.js", () => ({ resolveSandboxContext }));
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const config = { tools: { fs: { workspaceOnly: false } } };
 
-async function prepare(root: string) {
+async function prepare(root: string, opts: { execHost?: "local" | "node" } = {}) {
   return prepareRootedExecutionCapability({
-    rootedExecution: { root },
+    rootedExecution: { root, ...(opts.execHost !== undefined ? { execHost: opts.execHost } : {}) },
     agentId: "main",
     sessionId: "workshop-review",
     sessionKey: "agent:main:skill-collection-review",
@@ -121,5 +121,20 @@ describe("prepared rooted execution", () => {
     await expect(fs.readFile(path.join(root, "report.md"), "utf8")).resolves.toBe(
       "Reviewed SKILL.md",
     );
+  });
+
+  it("treats a node-placed rooted workspace as opaque and skips the gateway mkdir (see #161028)", async () => {
+    // Linux-style node home on a non-Linux gateway host: the gateway must not
+    // touch the filesystem. The path is preserved verbatim so the permission
+    // policy still has a stable root.
+    const nodeHome = "/home/alice/node-claude-rooted-home";
+    const mkdirSpy = vi.spyOn(fs, "mkdir");
+
+    const capability = await prepare(nodeHome, { execHost: "node" });
+
+    expect(mkdirSpy).not.toHaveBeenCalled();
+    expect(capability.root).toBe(nodeHome);
+    expect(capability.workspaceDir).toBe(nodeHome);
+    expect(capability.cwd).toBe(nodeHome);
   });
 });

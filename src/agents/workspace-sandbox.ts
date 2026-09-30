@@ -21,7 +21,16 @@ export type WorkspaceSandboxParams = Pick<
   | "requireWritableSandbox"
   | "requireWorkspaceOnly"
   | "workspaceDir"
->;
+> & {
+  /**
+   * Where the workspace physically lives. `"node"` means the workspace is
+   * owned by a paired node and the gateway must not touch its filesystem
+   * (no `mkdir`, no `realpath`) — the path is treated as an opaque string for
+   * permission policy only. `"local"` (default) preserves the original
+   * behaviour.
+   */
+  execHost?: "local" | "node";
+};
 
 /** Resolves the shared workspace and sandbox policy used by native and plugin harnesses. */
 export async function resolveAttemptWorkspaceSandbox(params: WorkspaceSandboxParams) {
@@ -31,7 +40,14 @@ export async function resolveAttemptWorkspaceSandbox(params: WorkspaceSandboxPar
     agentId: params.agentId,
   });
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
-  await fs.mkdir(resolvedWorkspace, { recursive: true });
+  const workspaceLivesOnNode = params.execHost === "node";
+  // Only the gateway-local case creates the workspace. A node-placed session
+  // owns its workspace on the node; the gateway must not mkdir the node's
+  // home (which can be a Linux path like `/home/<user>` running on a macOS
+  // gateway, see #161028).
+  if (!workspaceLivesOnNode) {
+    await fs.mkdir(resolvedWorkspace, { recursive: true });
+  }
   const sessionKey = params.sessionKey?.trim() || params.sessionId;
   const sandboxSessionKey = params.sandboxSessionKey?.trim() || sessionKey;
   const sandbox = await resolveSandboxContext({
@@ -51,8 +67,14 @@ export async function resolveAttemptWorkspaceSandbox(params: WorkspaceSandboxPar
   }
   const requestedCwd = params.cwd ? resolveUserPath(params.cwd) : undefined;
   // Recorded roots pin worktree/explicit-cwd boundaries; rootless sessions use
-  // the agent's canonical workspace as their permission boundary.
-  const sessionPermissionRoot = params.sessionRoot ?? (await fs.realpath(resolvedWorkspace));
+  // the agent's canonical workspace as their permission boundary. The
+  // realpath fallback for node-placed sessions keeps the permission root
+  // distinct from the local on-disk path the gateway would otherwise resolve.
+  const sessionPermissionRoot =
+    params.sessionRoot ??
+    (workspaceLivesOnNode
+      ? resolvedWorkspace
+      : await fs.realpath(resolvedWorkspace));
   const sessionPermissionPolicy = params.permissionMode
     ? {
         root: sessionPermissionRoot,
@@ -64,7 +86,9 @@ export async function resolveAttemptWorkspaceSandbox(params: WorkspaceSandboxPar
       "cwd override is not supported for sandboxed embedded agent runs; omit cwd or use the agent workspace as cwd",
     );
   }
-  await fs.mkdir(effectiveWorkspace, { recursive: true });
+  if (!workspaceLivesOnNode) {
+    await fs.mkdir(effectiveWorkspace, { recursive: true });
+  }
   return {
     effectiveCwd: sandbox?.enabled ? effectiveWorkspace : (requestedCwd ?? effectiveWorkspace),
     effectiveFsWorkspaceOnly:
