@@ -731,13 +731,7 @@ async function prepareCliRunContextWithinReadFence(
     params.abortSignal?.throwIfAborted();
     assertRootedCurrent();
     rootedExecution = await prepareRootedExecutionCapability({
-      rootedExecution: {
-        root: rootedRequest.root,
-        // Adopted Claude sessions on a paired node own their workspace on the
-        // node; the gateway must not mkdir or realpath the node's home path
-        // (which can be Linux-style on a macOS gateway, see #161028).
-        ...(nodeClaudePlacement ? { execHost: "node" as const } : {}),
-      },
+      rootedExecution: { root: rootedRequest.root },
       config: params.config,
       agentId: workspaceResolution.agentId,
       sessionId: params.sessionId,

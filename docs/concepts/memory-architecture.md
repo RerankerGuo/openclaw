@@ -64,18 +64,27 @@ Nothing crosses from episodic to curated without passing the promotion gates
 described below.
 
 The Episodic row's "Injected" cell is intentionally narrower than
-"Never": episodic content is **not** part of the standard session-start
-context, but when an agent opts into
-[Remember across conversations](/concepts/active-memory#remember-across-conversations),
-the Active Memory pass can read transcript excerpts from that agent's other
-private conversations into the reply pre-generation context. That is a
-separate mechanism from the on-demand `memory_search` / `memory_recall`
-tools, both of which only run when the agent or user explicitly invokes
-them. The two paths share the same privacy boundary described in
-[Active Memory enabling](/concepts/active-memory#remember-across-conversations):
-only the same agent's recognized private conversations are eligible, the
-conversation being answered is excluded, and groups, channels, and other
-agents never contribute.
+"Never", because two distinct paths can surface episodic content, and
+neither of them is the session-start injection the other tiers describe.
+
+The first is the [Active Memory](/concepts/active-memory) cross-conversation
+pass. It reads transcript excerpts from the same agent's other private
+conversations into the reply's pre-generation context. It **defaults on for
+personal installs** (global `session.dmScope` unset or `"main"` with no
+binding override; any configured DM isolation defaults it off, and an explicit
+`true`/`false` always wins), must remain enabled to run, and adds a bounded
+blocking step before eligible private replies.
+
+The second is the on-demand `memory_search` / `memory_recall` pair. Those run
+only when the agent or the user explicitly invokes them, and they search
+whatever the session-search visibility contract already allows — Active
+Memory does not widen that contract, merge transcripts, or change session keys
+and delivery routes.
+
+What both paths share is a boundary over transcripts, not a claim about the
+session-search permission surface: only the same agent's recognized private
+conversations are eligible, the conversation being answered is excluded, and
+groups, channels, and other agents never contribute.
 
 ## Provenance: every memory knows where it came from
 
