@@ -10,6 +10,7 @@ import {
   callGateway,
   gatewayResponseError,
   readGatewayOwnerLease,
+  classifyPortListener,
   resetRestartHealthMocks,
   restoreRestartHealthMocks,
   sleep,
@@ -901,6 +902,7 @@ describe("restart health", () => {
       port: 18789,
       attempts: 120,
       delayMs: 500,
+      diagnosticPortHoldExit: true,
     });
 
     expect(snapshot.waitOutcome).toBe("port-held-foreign");
@@ -909,11 +911,17 @@ describe("restart health", () => {
     expect(snapshot.portUsage.listeners).toEqual([
       { pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" },
     ]);
+    // Exit on the first observation: no retry delay may elapse. The attempt's
+    // health probe runs before the outcome checks on this base, so the
+    // prompt-exit contract is about the wait budget, not the probe.
     expect(sleep).not.toHaveBeenCalled();
-    expect(callGateway).not.toHaveBeenCalled();
+    expect(inspectPortUsage).toHaveBeenCalledTimes(1);
   });
 
-  it("exits promptly when an unknown listener holds the Gateway port and no service is running", async () => {
+  it("keeps waiting when an unidentified listener holds the Gateway port", async () => {
+    // "unknown" means the classifier could not identify ownership — a Gateway
+    // whose process details are unavailable lands there, so probing must
+    // continue instead of reporting a false foreign diagnosis.
     classifyPortListener.mockReturnValue("unknown");
     inspectPortUsage.mockResolvedValue({
       port: 18789,
@@ -926,13 +934,40 @@ describe("restart health", () => {
     const snapshot = await waitForGatewayHealthyRestart({
       service: makeGatewayService({ status: "stopped" }),
       port: 18789,
-      attempts: 60,
-      delayMs: 1_000,
+      attempts: 2,
+      delayMs: 1,
+      diagnosticPortHoldExit: true,
     });
 
-    expect(snapshot.waitOutcome).toBe("port-held-foreign");
-    expect(snapshot.healthy).toBe(false);
-    expect(sleep).not.toHaveBeenCalled();
+    expect(snapshot.waitOutcome).not.toBe("port-held-foreign");
+    expect(sleep).toHaveBeenCalled();
+  });
+
+  it("does not early-exit a lifecycle wait on a foreign listener", async () => {
+    // Start/restart/update activation consume this same waiter and must still
+    // wait for the Gateway they launched; the early exit is diagnostic-only.
+    classifyPortListener.mockReturnValue("non_gateway");
+    inspectPortUsage.mockResolvedValue({
+      port: 18789,
+      status: "busy",
+      listeners: [{ pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" }],
+      hints: [],
+    });
+    callGateway.mockImplementation(
+      gatewayHealthResponse({ server: { version: "2026.8.1" } }),
+    );
+
+    const { waitForGatewayHealthyRestart } = await import("./restart-health.js");
+    const snapshot = await waitForGatewayHealthyRestart({
+      service: makeGatewayService({ status: "stopped" }),
+      port: 18789,
+      expectedVersion: "2026.8.1",
+      attempts: 3,
+      delayMs: 10,
+      settle: { probes: 1 },
+    });
+
+    expect(snapshot.waitOutcome).not.toBe("port-held-foreign");
   });
 
   it("does not early-exit when a foreign listener shares the port with a Gateway listener", async () => {
@@ -966,6 +1001,7 @@ describe("restart health", () => {
       attempts: 4,
       delayMs: 10,
       settle: { probes: 1 },
+      diagnosticPortHoldExit: true,
     });
 
     expect(snapshot.waitOutcome).not.toBe("port-held-foreign");
@@ -990,6 +1026,7 @@ describe("restart health", () => {
       attempts: 2,
       delayMs: 1,
       settle: { probes: 1 },
+      diagnosticPortHoldExit: true,
     });
 
     expect(snapshot.waitOutcome).not.toBe("port-held-foreign");
