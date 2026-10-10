@@ -78,6 +78,10 @@ export async function waitForGatewayDiagnosticReadiness(opts: {
           probeHosts: LOOPBACK_PORT_PROBE_HOSTS,
           requirePluginHealth: false,
           waitForMissingService: false,
+          // Diagnostics only wait to observe, never to launch: report an
+          // affirmatively foreign port holder immediately instead of polling
+          // out the budget (issue #161024). Lifecycle waits never set this.
+          diagnosticPortHoldExit: true,
           onProgress: opts.onProgress,
           service: {
             readCommand: async () => null,
