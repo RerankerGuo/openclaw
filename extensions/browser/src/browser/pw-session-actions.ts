@@ -11,6 +11,7 @@ import {
   withCdpSocket,
 } from "./cdp.helpers.js";
 import { AX_REF_PATTERN, normalizeCdpWsUrl } from "./cdp.js";
+import { resolveBrowserNavigationTimeoutMs } from "./act-policy.js";
 import { DEFAULT_BROWSER_ACTION_TIMEOUT_MS } from "./constants.js";
 import { resolveBrowserEngine } from "./engines/registry.js";
 import type { BrowserEngineId } from "./engines/types.js";
@@ -529,6 +530,8 @@ export async function createPageViaPlaywright(
     engine?: BrowserEngineId;
     url: string;
     cdpPolicy?: SsrFPolicy;
+    /** Optional explicit navigation timeout (ms). Bounded by the shared navigation policy cap. */
+    timeoutMs?: number;
     signal?: AbortSignal;
     /** Caller authority is checked at each effect boundary, independently of cancellation. */
     assertCurrent?: () => void;
@@ -602,7 +605,9 @@ export async function createPageViaPlaywright(
           cdpUrl: opts.cdpUrl,
           page,
           url: targetUrl,
-          timeoutMs: 30_000,
+          // Bound the explicit request by the shared navigation policy so the
+          // page.goto budget matches the rest of the browser surface. (#169944)
+          timeoutMs: resolveBrowserNavigationTimeoutMs(opts.timeoutMs),
           ...navigationPolicy,
           targetId: createdTargetId ?? undefined,
           assertPageCurrent: assertCurrent,

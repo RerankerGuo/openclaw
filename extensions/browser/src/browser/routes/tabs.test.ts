@@ -375,6 +375,67 @@ describe("browser tab routes", () => {
     });
   });
 
+  // Regression for #169944: the route must forward an explicit body.timeoutMs
+  // to profileCtx.openTab so the guarded page.goto can honor it.
+  it("forwards an explicit body.timeoutMs to openTab and bounds it at 120s (#169944)", async () => {
+    const profileCtx = createProfileContext();
+    const response = await callTabsRoute({
+      method: "post",
+      path: "/tabs/open",
+      body: { url: "https://example.com", timeoutMs: 60_000 },
+      profileCtx,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(profileCtx.openTab).toHaveBeenCalledWith("https://example.com", {
+      label: undefined,
+      signal: expect.any(AbortSignal),
+      timeoutMs: 60_000,
+    });
+  });
+
+  it("clamps an over-cap body.timeoutMs to the 120s navigation policy cap (#169944)", async () => {
+    const profileCtx = createProfileContext();
+    const response = await callTabsRoute({
+      method: "post",
+      path: "/tabs/open",
+      body: { url: "https://example.com", timeoutMs: 5 * 60_000 },
+      profileCtx,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(profileCtx.openTab).toHaveBeenCalledWith("https://example.com", {
+      label: undefined,
+      signal: expect.any(AbortSignal),
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("omits timeoutMs from openTab when the caller does not provide one (#169944)", async () => {
+    const profileCtx = createProfileContext();
+    const response = await callTabsRoute({
+      method: "post",
+      path: "/tabs/open",
+      body: { url: "https://example.com" },
+      profileCtx,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(profileCtx.openTab).toHaveBeenCalledWith("https://example.com", {
+      label: undefined,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("rejects a non-integer body.timeoutMs with a 400 error (#169944)", async () => {
+    const profileCtx = createProfileContext();
+    const response = await callTabsRoute({
+      method: "post",
+      path: "/tabs/open",
+      body: { url: "https://example.com", timeoutMs: "not-a-number" },
+      profileCtx,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(profileCtx.openTab).not.toHaveBeenCalled();
+  });
+
   it("returns browser-not-running for close when the browser is not reachable", async () => {
     await expectBrowserNotRunningAction("close");
   });

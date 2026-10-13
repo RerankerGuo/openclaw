@@ -397,6 +397,26 @@ describe("pw-session createPageViaPlaywright navigation guard", () => {
     );
     expect(f.pageClose).not.toHaveBeenCalled();
   });
+
+  // Regression for #169944: the caller's explicit timeoutMs must reach the
+  // guarded page.goto instead of being dropped at the hard-coded 30s constant.
+  it("forwards an explicit timeoutMs to page.goto when creating a tab (#169944)", async () => {
+    const opened = await create({ timeoutMs: 60_000 });
+    expect(opened.targetId).toBe("TARGET_1");
+    expect(f.pageGoto).toHaveBeenCalledTimes(1);
+    // resolveBrowserNavigationTimeoutMs clamps to a max of 120s.
+    expect(f.pageGoto.mock.calls[0]?.[0]).toBe(publicUrl);
+    expect(f.pageGoto.mock.calls[0]?.[1]).toEqual({ timeout: 60_000 });
+  });
+  it("clamps an over-cap timeoutMs via the shared navigation policy (#169944)", async () => {
+    await create({ timeoutMs: 5 * 60_000 });
+    expect(f.pageGoto.mock.calls[0]?.[1]).toEqual({ timeout: 120_000 });
+  });
+  it("uses the shared navigation policy default when timeoutMs is omitted (#169944)", async () => {
+    await create();
+    // Default from resolveBrowserNavigationTimeoutMs(undefined) = 20_000ms.
+    expect(f.pageGoto.mock.calls[0]?.[1]).toEqual({ timeout: 20_000 });
+  });
 });
 
 describe("pw-session guarded browser navigation route cleanup", () => {

@@ -1,5 +1,6 @@
 import { clampPositiveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { asNullableRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveBrowserNavigationTimeoutMs } from "./act-policy.js";
 import {
   browserClientTimeout,
   postBrowserJson,
@@ -315,6 +316,8 @@ export async function browserOpenTab(
     managedOnly?: boolean;
   },
 ): Promise<BrowserOpenResult> {
+  const navigationTimeoutMs =
+    opts?.timeoutMs === undefined ? undefined : resolveBrowserNavigationTimeoutMs(opts.timeoutMs);
   return await postBrowserJson(
     baseUrl,
     "/tabs/open",
@@ -322,6 +325,10 @@ export async function browserOpenTab(
       url,
       ...(opts?.label ? { label: opts.label } : {}),
       ...(opts?.managedOnly ? { managedOnly: true } : {}),
+      // Forward the caller's explicit navigation budget so the host can pass it
+      // through to the guarded page.goto. The route bounds it with the shared
+      // navigation policy cap. (#169944)
+      ...(navigationTimeoutMs !== undefined ? { timeoutMs: navigationTimeoutMs } : {}),
     },
     browserClientTimeout(baseUrl, opts?.timeoutMs, 15000),
     opts,

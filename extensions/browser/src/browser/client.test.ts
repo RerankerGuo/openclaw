@@ -571,4 +571,79 @@ describe("browser client", () => {
     ) as { timeoutMs?: unknown };
     expect(screenshotBody.timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
   });
+
+  // Regression for #169944: an explicit opts.timeoutMs on browserOpenTab must
+  // reach the POST body so the host can forward it to the guarded page.goto.
+  it("browserOpenTab forwards an explicit timeoutMs into the POST body (#169944)", async () => {
+    const calls: Array<{ url: string; init?: RequestInit & { timeoutMs?: number } }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit & { timeoutMs?: number }) => {
+        calls.push({ url, init });
+        if (url.endsWith("/tabs/open")) {
+          return jsonResponse({ targetId: "t-open", title: "Modal", url: "https://y" });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+    try {
+      await browserOpenTab("http://127.0.0.1:18791", "https://example.com", {
+        timeoutMs: 60_000,
+      });
+      const openCall = calls.find((c) => c.url.endsWith("/tabs/open"));
+      expect(openCall?.init?.method).toBe("POST");
+      const body = JSON.parse(
+        typeof openCall?.init?.body === "string" ? openCall.init.body : "{}",
+      ) as { timeoutMs?: unknown };
+      expect(body.timeoutMs).toBe(60_000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("browserOpenTab clamps an over-cap timeoutMs to 120s in the body (#169944)", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        if (url.endsWith("/tabs/open")) {
+          return jsonResponse({ targetId: "t-open", title: "M", url: "https://y" });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+    try {
+      await browserOpenTab("http://127.0.0.1:18791", "https://example.com", {
+        timeoutMs: 5 * 60_000,
+      });
+      const body = JSON.parse(
+        typeof calls[0]?.init?.body === "string" ? calls[0].init.body : "{}",
+      ) as { timeoutMs?: unknown };
+      expect(body.timeoutMs).toBe(120_000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("browserOpenTab omits timeoutMs from the body when the caller does not set one (#169944)", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        if (url.endsWith("/tabs/open")) {
+          return jsonResponse({ targetId: "t-open", title: "M", url: "https://y" });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+    try {
+      await browserOpenTab("http://127.0.0.1:18791", "https://example.com");
+      const body = JSON.parse(
+        typeof calls[0]?.init?.body === "string" ? calls[0].init.body : "{}",
+      ) as { timeoutMs?: unknown };
+      expect("timeoutMs" in body).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

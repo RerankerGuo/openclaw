@@ -1,4 +1,5 @@
 import { clampPositiveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
+import { resolveBrowserNavigationTimeoutMs } from "../act-policy.js";
 import {
   BrowserProfileUnavailableError,
   BrowserTabNotFoundError,
@@ -16,7 +17,7 @@ import { isProfileRestartRequiredError } from "../server-context.lifecycle.js";
 import { clearSnapshotKeysForTab } from "../snapshot-delta-cache.js";
 import { resolveTargetIdFromTabs } from "../target-id.js";
 import { browserNavigationPolicyForProfile, resolveProfileContext } from "./agent.shared.js";
-import { readRouteNonNegativeInteger } from "./route-numeric.js";
+import { readRouteNonNegativeInteger, readRouteTimerTimeoutMs } from "./route-numeric.js";
 import type { BrowserRequest, BrowserResponse, BrowserRouteRegistrar } from "./types.js";
 import { jsonBrowserError, jsonError, runProfileRouteOperation, toStringOrEmpty } from "./utils.js";
 
@@ -264,6 +265,20 @@ export function registerBrowserTabRoutes(app: BrowserRouteRegistrar, ctx: Browse
     if (!url) {
       return jsonError(res, 400, "url is required");
     }
+    // Accept the caller's explicit navigation budget so the page.goto timeout can
+    // match slow pages instead of failing at the 30s constant. (#169944)
+    let navigationTimeoutMs: number | undefined;
+    try {
+      const requestedTimeoutMs = readRouteTimerTimeoutMs(
+        (req.body as { timeoutMs?: unknown })?.timeoutMs,
+      );
+      navigationTimeoutMs =
+        requestedTimeoutMs === undefined
+          ? undefined
+          : resolveBrowserNavigationTimeoutMs(requestedTimeoutMs);
+    } catch (err) {
+      return jsonError(res, 400, String(err instanceof Error ? err.message : err));
+    }
 
     await runTabsProfileRoute({
       req,
@@ -280,6 +295,7 @@ export function registerBrowserTabRoutes(app: BrowserRouteRegistrar, ctx: Browse
         const opened = await profileCtx.openTab(url, {
           label,
           signal,
+          ...(navigationTimeoutMs !== undefined ? { timeoutMs: navigationTimeoutMs } : {}),
           ...(isManagedOnlyBrowserRequest(req) ? { requireDurableOwnership: true } : {}),
         });
         return { ...opened, resolvedProfile: profileCtx.profile.name };
