@@ -15,13 +15,36 @@ const CLAUDE_CLI_AUTH_METHODS = [
   "none",
 ] as const;
 
-type ClaudeCliAuthStatus =
+/**
+ * Reason the CLI auth probe could not establish availability.
+ *
+ * - `timeout`: `claude auth status --json` exceeded the probe budget.
+ * - `spawn`: the CLI process could not be started (missing on PATH, wrapper
+ *   resolution failed, or spawn-time error).
+ * - `output`: the process produced output we could not interpret (truncated,
+ *   malformed JSON, or unparsable status payload).
+ * - `unknown`: any other unreadable failure.
+ *
+ * Distinguishing `timeout` lets the caller tell the user "your CLI is
+ * probably fine; the probe was too short" instead of "run `claude auth
+ * login`" — see #170503.
+ */
+export type ClaudeCliAuthUnavailableReason = "timeout" | "spawn" | "output" | "unknown";
+
+export type ClaudeCliAuthStatus =
   | {
       status: "available";
       authMethod?: (typeof CLAUDE_CLI_AUTH_METHODS)[number];
       email?: string;
     }
-  | { status: "missing" | "unreadable" };
+  | { status: "missing" }
+  | { status: "unreadable"; reason: ClaudeCliAuthUnavailableReason };
+
+/** Probe budget. The reporter's `claude auth status --json` takes ~3.6s on
+ *  WSL2/NativeLinux; the previous 3s budget produced false-unauthenticated
+ *  reports. 10s accommodates the observed cold-start latency while still
+ *  failing fast on a real hang. (Closes #170503.) */
+const CLAUDE_CLI_AUTH_PROBE_TIMEOUT_MS = 10_000;
 
 /** Ask Claude CLI whether its own login is usable without reading token material. */
 export async function probeClaudeCliAuthStatus(params?: {
@@ -45,18 +68,32 @@ export async function probeClaudeCliAuthStatus(params?: {
       maxOutputBytes: 64 * 1024,
       maxCombinedOutputBytes: 64 * 1024,
       terminateOnOutputLimit: true,
-      timeoutMs: 3_000,
+      timeoutMs: CLAUDE_CLI_AUTH_PROBE_TIMEOUT_MS,
       signal: params?.signal,
       killProcessTree: true,
     });
     params?.signal?.throwIfAborted();
     if (result.termination !== "exit" || result.code === null) {
-      return { status: "unreadable" };
+      // Distinguish a wall-time timeout from other unreadable causes so callers
+      // can tell the user "your CLI is probably fine; the probe was too short"
+      // instead of "run `claude auth login`". (#170503)
+      const reason: ClaudeCliAuthUnavailableReason =
+        result.termination === "no-output-timeout" || result.noOutputTimedOut === true
+          ? "timeout"
+          : result.termination === "timeout"
+            ? "timeout"
+            : "unknown";
+      return { status: "unreadable", reason };
     }
     if (result.code !== 0) {
       return { status: "missing" };
     }
-    const parsed: unknown = JSON.parse(result.stdout);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.stdout);
+    } catch {
+      return { status: "unreadable", reason: "output" };
+    }
     if (!isRecord(parsed) || parsed.loggedIn !== true) {
       return { status: "missing" };
     }
@@ -69,6 +106,6 @@ export async function probeClaudeCliAuthStatus(params?: {
     };
   } catch {
     params?.signal?.throwIfAborted();
-    return { status: "unreadable" };
+    return { status: "unreadable", reason: "spawn" };
   }
 }

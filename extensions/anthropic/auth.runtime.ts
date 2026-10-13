@@ -223,6 +223,15 @@ export async function runAnthropicCliMigration(
 ): Promise<ProviderAuthResult> {
   const authStatus = await claudeCliAuth.probeClaudeCliAuthStatus({ env: ctx.env ?? process.env });
   if (authStatus.status !== "available") {
+    if (authStatus.status === "unreadable" && authStatus.reason === "timeout") {
+      throw new Error(
+        [
+          "OpenClaw could not verify the installed Claude CLI login within the probe budget.",
+          `Run ${formatCliCommand("claude auth status")}; if that succeeds, re-run this setup.`,
+          "If `claude auth status` itself is slow on this host, increase the probe timeout.",
+        ].join("\n"),
+      );
+    }
     throw new Error(
       [
         "Claude CLI is not authenticated on this host.",
@@ -240,16 +249,24 @@ export async function runAnthropicCliMigrationNonInteractive(ctx: {
 }): Promise<ProviderAuthContext["config"] | null> {
   const authStatus = await claudeCliAuth.probeClaudeCliAuthStatus();
   if (authStatus.status !== "available") {
-    const error =
-      authStatus.status === "unreadable"
-        ? [
-            'Auth choice "anthropic-cli" could not verify the installed Claude CLI login.',
-            `Run ${formatCliCommand("claude auth status")}, then retry.`,
-          ]
-        : [
-            'Auth choice "anthropic-cli" requires Claude CLI auth on this host.',
-            `Run ${formatCliCommand("claude auth login")} first.`,
-          ];
+    let error: string[];
+    if (authStatus.status === "unreadable" && authStatus.reason === "timeout") {
+      error = [
+        'Auth choice "anthropic-cli" timed out while verifying the installed Claude CLI login.',
+        `Run ${formatCliCommand("claude auth status")} to confirm the login; if that succeeds, retry.`,
+        "If `claude auth status` itself is slow on this host, increase the probe timeout.",
+      ];
+    } else if (authStatus.status === "unreadable") {
+      error = [
+        'Auth choice "anthropic-cli" could not verify the installed Claude CLI login.',
+        `Run ${formatCliCommand("claude auth status")}, then retry.`,
+      ];
+    } else {
+      error = [
+        'Auth choice "anthropic-cli" requires Claude CLI auth on this host.',
+        `Run ${formatCliCommand("claude auth login")} first.`,
+      ];
+    }
     ctx.runtime.error(error.join("\n"));
     ctx.runtime.exit(1);
     return null;

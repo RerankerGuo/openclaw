@@ -38,7 +38,7 @@ it("asks Claude CLI for its active account and returns only safe display fields"
 
   expect(runUtf8CommandWithTimeout).toHaveBeenCalledWith(
     ["/test/claude", "auth", "status", "--json"],
-    expect.objectContaining({ timeoutMs: 3_000, killProcessTree: true }),
+    expect.objectContaining({ timeoutMs: 10_000, killProcessTree: true }),
   );
 });
 
@@ -119,6 +119,7 @@ it("reports unresolved Windows wrappers as unreadable without spawning", async (
     await withMockedWindowsPlatform(async () => {
       expect(await probeClaudeCliAuthStatus({ command, env: {} })).toEqual({
         status: "unreadable",
+        reason: "spawn",
       });
       expect(runUtf8CommandWithTimeout).not.toHaveBeenCalled();
     });
@@ -171,4 +172,67 @@ it("does not turn a cancelled probe into a logged-out account", async () => {
     return { code: null, termination: "signal", stdout: "" };
   });
   await expect(probeClaudeCliAuthStatus({ signal: controller.signal })).rejects.toBe(reason);
+});
+
+// Regression for #170503: the probe must give `claude auth status --json`
+// enough wall time to finish on hosts where it takes >3s, and must report a
+// probe timeout with a distinguishable reason rather than report "missing".
+it("surfaces a probe timeout as unreadable with reason='timeout' (#170503)", async () => {
+  runUtf8CommandWithTimeout.mockResolvedValue({
+    code: null,
+    termination: "timeout",
+    stdout: "",
+  });
+  expect(await probeClaudeCliAuthStatus({ command: "/test/claude" })).toEqual({
+    status: "unreadable",
+    reason: "timeout",
+  });
+  expect(runUtf8CommandWithTimeout).toHaveBeenCalledWith(
+    ["/test/claude", "auth", "status", "--json"],
+    expect.objectContaining({ timeoutMs: 10_000, killProcessTree: true }),
+  );
+});
+
+it("surfaces a no-output probe timeout as unreadable with reason='timeout' (#170503)", async () => {
+  runUtf8CommandWithTimeout.mockResolvedValue({
+    code: null,
+    termination: "no-output-timeout",
+    stdout: "",
+  });
+  expect(await probeClaudeCliAuthStatus({ command: "/test/claude" })).toEqual({
+    status: "unreadable",
+    reason: "timeout",
+  });
+});
+
+it("surfaces malformed JSON stdout as unreadable with reason='output' (#170503)", async () => {
+  runUtf8CommandWithTimeout.mockResolvedValue({
+    code: 0,
+    termination: "exit",
+    stdout: "not-json",
+  });
+  expect(await probeClaudeCliAuthStatus({ command: "/test/claude" })).toEqual({
+    status: "unreadable",
+    reason: "output",
+  });
+});
+
+it("surfaces a non-timeout signal termination as unreadable with reason='unknown' (#170503)", async () => {
+  runUtf8CommandWithTimeout.mockResolvedValue({
+    code: null,
+    termination: "signal",
+    stdout: "",
+  });
+  expect(await probeClaudeCliAuthStatus({ command: "/test/claude" })).toEqual({
+    status: "unreadable",
+    reason: "unknown",
+  });
+});
+
+it("surfaces spawn-time errors as unreadable with reason='spawn' (#170503)", async () => {
+  runUtf8CommandWithTimeout.mockRejectedValue(new Error("ENOENT"));
+  expect(await probeClaudeCliAuthStatus({ command: "/test/claude" })).toEqual({
+    status: "unreadable",
+    reason: "spawn",
+  });
 });
