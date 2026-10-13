@@ -226,6 +226,11 @@ export function resolveGatewaySessionThinkingProjectionInternal(
       : logicalEntry;
   const runtimeCatalog =
     catalogEntry && params.modelCatalogRouteVariants ? [catalogEntry] : params.modelCatalog;
+  // The selected physical route variant does not carry configured overrides
+  // (e.g. reasoning: false) that the merged logical entry owns. Carry the
+  // logical configuredReasoning so the thinking profile matches the merged
+  // entry, not just the variant. (Closes #170528.)
+  const configuredReasoning = logicalEntry?.reasoning === false ? false : undefined;
   const { metadata, profile: thinkingProfile } = resolveGatewayModelThinkingFacts({
     cfg: params.cfg,
     agentId: params.agentId,
@@ -235,6 +240,7 @@ export function resolveGatewaySessionThinkingProjectionInternal(
     modelCatalog: runtimeCatalog,
     rowContext: params.rowContext,
     providerPolicySource: params.providerPolicySource,
+    ...(configuredReasoning !== undefined ? { configuredReasoning } : {}),
   });
   const storedThinkingLevel = normalizeThinkLevel(params.entry?.thinkingLevel);
   const thinkingLevel = storedThinkingLevel

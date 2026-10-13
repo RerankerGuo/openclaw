@@ -186,6 +186,100 @@ describe("resolveGatewaySessionThinkingProjectionInternal", () => {
     expect(readAcpSessionMeta).toHaveBeenCalledWith({ sessionKey: "global", agentId: "ops" });
   });
 
+  it("carries merged reasoning:false into the route-variant sessions.list projection (#170528)", () => {
+    // The merged catalog carries configured reasoning:false. The selected
+    // physical route variant does not. sessions.list used to project the
+    // thinking profile from the variant alone, so the user-configured
+    // reasoning:false was dropped and the row disagreed with models.list /
+    // agents.list on thinkingLevels.
+    const profile = vi.spyOn(thinking, "resolveThinkingProfile").mockImplementation((params) => {
+      const collapsed =
+        params.configuredReasoning === false
+          ? [{ id: "off" as const, label: "Off", rank: 0 }]
+          : [
+              { id: "off" as const, label: "Off", rank: 0 },
+              { id: "minimal" as const, label: "Minimal", rank: 1 },
+              { id: "low" as const, label: "Low", rank: 2 },
+              { id: "medium" as const, label: "Medium", rank: 3 },
+              { id: "high" as const, label: "High", rank: 4 },
+              { id: "xhigh" as const, label: "XHigh", rank: 5 },
+            ];
+      const hostUltra =
+        params.agentRuntime === "openclaw" ||
+        params.agentRuntime === "auto" ||
+        params.agentRuntime === "claude-cli";
+      return {
+        levels: hostUltra
+          ? [...collapsed, { id: "ultra" as const, label: "Ultra", rank: 99 }]
+          : collapsed,
+        defaultLevel: "off" as const,
+      };
+    });
+    try {
+      const projection = resolveGatewaySessionThinkingProjectionInternal({
+        cfg: {},
+        agentId: "main",
+        provider: "route-provider",
+        model: "route-model",
+        sessionKey: "agent:main:main",
+        entry: { sessionId: "configured-reasoning-route", updatedAt: 1 },
+        modelCatalog: [
+          {
+            provider: "route-provider",
+            id: "route-model",
+            name: "Route model",
+            reasoning: false,
+          },
+        ],
+        // Raw route variant lacks the configured reasoning:false override.
+        modelCatalogRouteVariants: [
+          { provider: "route-provider", id: "route-model", name: "Route model" },
+        ],
+      });
+      expect(projection.thinkingOptions).toEqual(["Off", "Ultra"]);
+      expect(projection.thinkingLevels.map(({ id }) => id)).toEqual(["off", "ultra"]);
+    } finally {
+      profile.mockRestore();
+    }
+  });
+
+  it("does not inject configuredReasoning when the merged entry omits it", () => {
+    // Negative control: when the merged entry has no reasoning field, the
+    // projection must not pass configuredReasoning:undefined — which is the
+    // same as omitting it — and must still return the full provider ladder.
+    const seenConfiguredReasoning: Array<boolean | undefined> = [];
+    const profile = vi.spyOn(thinking, "resolveThinkingProfile").mockImplementation((params) => {
+      seenConfiguredReasoning.push(params.configuredReasoning);
+      return {
+        levels: [
+          { id: "off" as const, label: "Off", rank: 0 },
+          { id: "minimal" as const, label: "Minimal", rank: 1 },
+          { id: "ultra" as const, label: "Ultra", rank: 99 },
+        ],
+        defaultLevel: "off" as const,
+      };
+    });
+    try {
+      resolveGatewaySessionThinkingProjectionInternal({
+        cfg: {},
+        agentId: "main",
+        provider: "route-provider",
+        model: "route-model",
+        sessionKey: "agent:main:main",
+        entry: { sessionId: "no-configured-reasoning", updatedAt: 1 },
+        modelCatalog: [
+          { provider: "route-provider", id: "route-model", name: "Route model" },
+        ],
+        modelCatalogRouteVariants: [
+          { provider: "route-provider", id: "route-model", name: "Route model" },
+        ],
+      });
+      expect(seenConfiguredReasoning).toEqual([undefined]);
+    } finally {
+      profile.mockRestore();
+    }
+  });
+
   it("keeps a prepared row from adopting a replacement session's ACP runtime", () => {
     const cfg: OpenClawConfig = {
       agents: {
