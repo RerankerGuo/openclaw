@@ -6,6 +6,7 @@ import { gatewayHealthResponse } from "../../gateway/health-response.test-suppor
 import { CommandProcessCleanupError } from "../../process/exec-result.js";
 import {
   callGateway,
+  classifyPortListener,
   hasActiveStartupMigrationLease,
   inspectPortUsage,
   monotonicClock,
@@ -654,5 +655,55 @@ describe("diagnostic Gateway readiness", () => {
 
     expect(result).toMatchObject({ healthy: true, waitOutcome: "healthy" });
     expect(monotonicClock.nowMs).toBe(0);
+  });
+
+  it.each(["stopped", "unknown"])(
+    "bounds a %s installed Gateway with the caller's shorter deadline",
+    async (status) => {
+      readRuntime.mockResolvedValue({ status });
+      const result = await waitForGatewayDiagnosticReadiness({
+        config: { gateway: { auth: { mode: "none" } } },
+        timeoutMs: 1_250,
+      });
+      expect(result).toMatchObject({
+        healthy: false,
+        waitOutcome: "timeout",
+        elapsedMs: 1_250,
+        portUsage: { status: "free" },
+      });
+      expect(callGateway).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports an affirmatively foreign port holder immediately instead of polling to the deadline", async () => {
+    // Issue #161024: `openclaw status` with no Gateway and a foreign listener
+    // on the configured port used to poll out the full restart-health budget.
+    // The diagnostic adapter opts into the port-hold early exit, so the wait
+    // ends on the first observation with the operator-readable outcome.
+    classifyPortListener.mockReturnValue("non_gateway");
+    inspectPortUsage.mockImplementation(async (port) => ({
+      port,
+      status: "busy",
+      listeners: [{ pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" }],
+      hints: [],
+    }));
+
+    const result = await waitForGatewayDiagnosticReadiness({
+      config: { gateway: { auth: { mode: "none" } } },
+      timeoutMs: 30_000,
+    });
+
+    expect(result).toMatchObject({
+      healthy: false,
+      waitOutcome: "port-held-foreign",
+      runtime: { status: "stopped" },
+      portUsage: {
+        status: "busy",
+        listeners: [{ pid: 4242, command: "socat", commandLine: "socat TCP-LISTEN:18789" }],
+      },
+    });
+    // Prompt exit: the wait budget was never consumed by a retry delay.
+    expect(monotonicClock.nowMs).toBe(0);
+    expect(inspectPortUsage).toHaveBeenCalledTimes(1);
   });
 });
